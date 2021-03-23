@@ -44,7 +44,8 @@ android {
 cargo {
     module  = "../../rust"
     libname = "adblockerjni"
-    targets = ["arm64", "arm", "x86_64"]
+    //"arm64", "arm", "x86_64",
+    targets = ['darwin']
     verbose = false
     prebuiltToolchains = true
     apiLevel = 21
@@ -55,6 +56,10 @@ tasks.whenTaskAdded { task ->
     if ((task.name == 'javaPreCompileDebug' || task.name == 'javaPreCompileRelease')) {
         task.dependsOn 'cargoBuild'
     }
+}
+
+tasks.withType(Test) {
+    systemProperty "java.library.path", "../../rust/target/debug/"
 }
 
 dependencies {
