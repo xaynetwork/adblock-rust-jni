@@ -3,17 +3,16 @@
 extern crate log;
 extern crate android_logger;
 
-use adblock::blocker::BlockerResult;
 use adblock::engine::Engine;
 use android_logger::Config;
 use jni::objects::{JObject, JString};
-use jni::sys::{jstring, jlong};
+use jni::sys::{jlong, jbyte, jbyteArray};
 use jni::JNIEnv;
 use log::{Level, LevelFilter};
-use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::prelude::*;
 use env_logger::Builder;
+use adblock::resources::{Resource, ResourceType, MimeType};
 
 macro_rules! throwAndPanic {
     ($env:expr,$message:expr)=>{
@@ -26,6 +25,10 @@ macro_rules! throwAndPanic {
 }
 
 static mut IS_INITIALIZED: bool = false;
+const IS_MATCHED_MASK: i8 = 1;
+const IS_IMPORTANT_MASK: i8 = 2;
+const IS_EXCEPTION_MASK: i8 = 4;
+
 
 unsafe fn check_init() {
     if !IS_INITIALIZED {
@@ -39,6 +42,22 @@ unsafe fn check_init() {
         };
         IS_INITIALIZED = true;
     }
+}
+
+unsafe fn unwrapString(env: &JNIEnv, jString: JString) -> String {
+    let loadedRules: String = match env.get_string(jString) {
+        Err(why) => {
+            throwAndPanic!(env, format!("Could not convert JString to String: {}", why))
+        }
+        Ok(str) => str.into(),
+    };
+    loadedRules
+}
+
+unsafe fn unwrapEngine<'a>(env: &'a JNIEnv, enginePointer: i64) -> &'a mut Engine {
+    let enginePointer = enginePointer as *mut Engine;
+    let engine = if let Some(restored) = enginePointer.as_mut() { restored } else { throwAndPanic!(&env,  "Engine is not allocated anymore!") };
+    engine
 }
 
 
@@ -84,340 +103,255 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineCreate(
     _: JObject,
     rules: JString,
 ) -> jlong {
-    let loadedRules: String = match env.get_string(rules) {
-        Err(why) => {
-            throwAndPanic!(env,  format!("Could not convert rules to string: {}", why))
-        }
-        Ok(str) => str.into(),
-    };
+    check_init();
+    let loadedRules = unwrapString(&env, rules);
 
     let mut filter_set = adblock::lists::FilterSet::new(false);
+    debug!("Created filter_set with {:?}", &loadedRules);
     filter_set.add_filter_list(&loadedRules, adblock::lists::FilterFormat::Standard);
     let engine = Engine::from_filter_set(filter_set, true);
     Box::into_raw(Box::new(engine)) as jlong
 }
 
-/// Checks if a `url` matches for the specified `Engine` within the context.
-///
-/// This API is designed for multi-engine use, so block results are used both as inputs and
-/// outputs. They will be updated to reflect additional checking within this engine, rather than
-/// being replaced with results just for this engine.
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_match(
-//     engine: *mut Engine,
-//     url: *const c_char,
-//     host: *const c_char,
-//     tab_host: *const c_char,
-//     third_party: bool,
-//     resource_type: *const c_char,
-//     did_match_rule: *mut bool,
-//     did_match_exception: *mut bool,
-//     did_match_important: *mut bool,
-//     redirect: *mut *mut c_char,
-// ) {
-//     let url = CStr::from_ptr(url).to_str().unwrap();
-//     let host = CStr::from_ptr(host).to_str().unwrap();
-//     let tab_host = CStr::from_ptr(tab_host).to_str().unwrap();
-//     let resource_type = CStr::from_ptr(resource_type).to_str().unwrap();
-//     assert!(!engine.is_null());
-//     let engine = Box::leak(Box::from_raw(engine));
-//     let blocker_result = engine.check_network_urls_with_hostnames_subset(
-//         url,
-//         host,
-//         tab_host,
-//         resource_type,
-//         Some(third_party),
-//         // Checking normal rules is skipped if a normal rule or exception rule was found previously
-//         *did_match_rule || *did_match_exception,
-//         // Always check exceptions unless one was found previously
-//         !*did_match_exception,
-//     );
-//     *did_match_rule |= blocker_result.matched;
-//     *did_match_exception |= blocker_result.exception.is_some();
-//     *did_match_important |= blocker_result.important;
-//     *redirect = match blocker_result.redirect {
-//         Some(x) => match CString::new(x) {
-//             Ok(y) => y.into_raw(),
-//             _ => ptr::null_mut(),
-//         },
-//         None => ptr::null_mut(),
-//     };
-// }
-
-/// Adds a tag to the engine for consideration
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_add_tag(engine: *mut Engine, tag: *const c_char) {
-//     let tag = CStr::from_ptr(tag).to_str().unwrap();
-//     assert!(!engine.is_null());
-//     let engine = Box::leak(Box::from_raw(engine));
-//     engine.enable_tags(&[tag]);
-// }
-
-/// Checks if a tag exists in the engine
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_tag_exists(engine: *mut Engine, tag: *const c_char) -> bool {
-//     let tag = CStr::from_ptr(tag).to_str().unwrap();
-//     assert!(!engine.is_null());
-//     let engine = Box::leak(Box::from_raw(engine));
-//     engine.tag_exists(tag)
-// }
-
-/// Adds a resource to the engine by name
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_add_resource(
-//     engine: *mut Engine,
-//     key: *const c_char,
-//     content_type: *const c_char,
-//     data: *const c_char,
-// ) -> bool {
-//     let key = CStr::from_ptr(key).to_str().unwrap();
-//     let content_type = CStr::from_ptr(content_type).to_str().unwrap();
-//     let data = CStr::from_ptr(data).to_str().unwrap();
-//     let resource = Resource {
-//         name: key.to_string(),
-//         aliases: vec![],
-//         kind: ResourceType::Mime(MimeType::from(std::borrow::Cow::from(content_type))),
-//         content: data.to_string(),
-//     };
-//     assert!(!engine.is_null());
-//     let engine = Box::leak(Box::from_raw(engine));
-//     engine.add_resource(resource).is_ok()
-// }
-
-/// Adds a list of `Resource`s from JSON format
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_add_resources(engine: *mut Engine, resources: *const c_char) {
-//     let resources = CStr::from_ptr(resources).to_str().unwrap();
-//     let resources: Vec<Resource> = serde_json::from_str(resources).unwrap_or_else(|e| {
-//         eprintln!("Failed to parse JSON adblock resources: {}", e);
-//         vec![]
-//     });
-//     assert!(!engine.is_null());
-//     let engine = Box::leak(Box::from_raw(engine));
-//     engine.use_resources(&resources);
-// }
-
-/// Removes a tag to the engine for consideration
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_remove_tag(engine: *mut Engine, tag: *const c_char) {
-//     let tag = CStr::from_ptr(tag).to_str().unwrap();
-//     assert!(!engine.is_null());
-//     let engine = Box::leak(Box::from_raw(engine));
-//     engine.disable_tags(&[tag]);
-// }
-
-/// Deserializes a previously serialized data file list.
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_deserialize(
-//     engine: *mut Engine,
-//     data: *const c_char,
-//     data_size: size_t,
-// ) -> bool {
-//     let data: &[u8] = std::slice::from_raw_parts(data as *const u8, data_size);
-//     assert!(!engine.is_null());
-//     let engine = Box::leak(Box::from_raw(engine));
-//     let ok = engine.deserialize(&data).is_ok();
-//     if !ok {
-//         eprintln!("Error deserializing adblock engine");
-//     }
-//     ok
-// }
-
-/// Destroy a `Engine` once you are done with it.
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_destroy(engine: *mut Engine) {
-//     if !engine.is_null() {
-//         drop(Box::from_raw(engine));
-//     }
-// }
-
-/// Destroy a `*c_char` once you are done with it.
-// #[no_mangle]
-// pub unsafe extern "C" fn c_char_buffer_destroy(s: *mut c_char) {
-//     if !s.is_null() {
-//         drop(CString::from_raw(s));
-//     }
-// }
-
-/// Returns a set of cosmetic filtering resources specific to the given url, in JSON format
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_url_cosmetic_resources(
-//     engine: *mut Engine,
-//     url: *const c_char,
-// ) -> *mut c_char {
-//     let url = CStr::from_ptr(url).to_str().unwrap();
-//     assert!(!engine.is_null());
-//     let engine = Box::leak(Box::from_raw(engine));
-//     let ptr = CString::new(serde_json::to_string(&engine.url_cosmetic_resources(url))
-//         .unwrap_or_else(|_| "".into()))
-//         .expect("Error: CString::new()")
-//         .into_raw();
-//     std::mem::forget(ptr);
-//     ptr
-// }
-
-/// Returns a stylesheet containing all generic cosmetic rules that begin with any of the provided class and id selectors
-///
-/// The leading '.' or '#' character should not be provided
-// #[no_mangle]
-// pub unsafe extern "C" fn engine_hidden_class_id_selectors(
-//     engine: *mut Engine,
-//     classes: *const *const c_char,
-//     classes_size: size_t,
-//     ids: *const *const c_char,
-//     ids_size: size_t,
-//     exceptions: *const *const c_char,
-//     exceptions_size: size_t,
-// ) -> *mut c_char {
-//     let classes = std::slice::from_raw_parts(classes, classes_size);
-//     let classes: Vec<String> = (0..classes_size)
-//         .map(|index| CStr::from_ptr(classes[index]).to_str().unwrap().to_owned())
-//         .collect();
-//     let ids = std::slice::from_raw_parts(ids, ids_size);
-//     let ids: Vec<String> = (0..ids_size)
-//         .map(|index| CStr::from_ptr(ids[index]).to_str().unwrap().to_owned())
-//         .collect();
-//     let exceptions = std::slice::from_raw_parts(exceptions, exceptions_size);
-//     let exceptions: std::collections::HashSet<String> = (0..exceptions_size)
-//         .map(|index| CStr::from_ptr(exceptions[index]).to_str().unwrap().to_owned())
-//         .collect();
-//     assert!(!engine.is_null());
-//     let engine = Box::leak(Box::from_raw(engine));
-//     let stylesheet = engine.hidden_class_id_selectors(&classes, &ids, &exceptions);
-//     CString::new(serde_json::to_string(&stylesheet).unwrap_or_else(|_| "".into())).expect("Error: CString::new()").into_raw()
-// }
-//
-//
-//
-
-
-
-/// Test methods
+/// Create a new `Engine`.
 #[no_mangle]
-pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_hello(
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineCreateDefault(
     env: JNIEnv,
     _: JObject,
-    j_recipient: JString,
-) -> jstring {
-    check_init();
-    let recipient = CString::from(CStr::from_ptr(
-        env.get_string(j_recipient).unwrap().as_ptr(),
-    ));
-
-    debug!("Will try to append Hello to {:?}", recipient.to_str());
-
-    let output = env
-        .new_string("Hello ".to_owned() + recipient.to_str().unwrap())
-        .unwrap();
-    output.into_inner()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_store(
-    env: JNIEnv,
-    _: JObject,
-    j_recipient: JString,
 ) -> jlong {
     check_init();
-    let recipient = CString::from(CStr::from_ptr(
-        env.get_string(j_recipient).unwrap().as_ptr(),
-    ));
-
-    let received = recipient.into_string().unwrap();
-    debug!("Will store {:?}", received);
-    Box::into_raw(Box::new(received)) as jlong
+    let engine = Engine::default();
+    Box::into_raw(Box::new(engine)) as jlong
 }
 
-
+/// Checks if a `url` matches for the specified `Engine` within the context.
+///
+/// This API is designed for multi-engine use.
 #[no_mangle]
-pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_restore(
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_simpleMatch(
     env: JNIEnv,
     _: JObject,
-    pointer: jlong,
-) -> jstring {
+    engine: jlong,
+    url: JString,
+    host: JString,
+    resource_type: JString,
+) -> jbyte
+{
     check_init();
-    let pointer = pointer as *mut String;
-    let restored = if let Some(restored) = pointer.as_ref() { restored } else { throwAndPanic!(&env,  "pointer is not allocated anymore!") };
+    let url = unwrapString(&env, url);
+    let host = unwrapString(&env, host);
+    let resource_type = unwrapString(&env, resource_type);
+    let engine = unwrapEngine(&env, engine);
 
-    debug!("restored {:?}", restored);
-
-    let output = env
-        .new_string(restored)
-        .unwrap();
-    // release
-    Box::from_raw(pointer);
-    output.into_inner()
+    let blocker_result = engine.check_network_urls(
+        &url,
+        &host,
+        &resource_type,
+    );
+    debug!("New result for {:?} with {:?}", url, blocker_result);
+    let mut result: i8 = 0;
+    if blocker_result.matched { result |= IS_MATCHED_MASK; }
+    if !blocker_result.exception.is_none() { result |= IS_EXCEPTION_MASK; }
+    if blocker_result.important { result |= IS_IMPORTANT_MASK; };
+    result
 }
 
 
+
+/// Checks if a `url` matches for the specified `Engine` within the context.
+///
+/// This API is designed for multi-engine use
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_match(
     env: JNIEnv,
     _: JObject,
-    j_url: JString,
-) -> bool {
+    engine: jlong,
+    url: JString,
+    host: JString,
+    tab_host: JString,
+    third_party: bool,
+    resource_type: JString,
+    previous_result: jbyte,
+) -> jbyte
+{
     check_init();
-    let path = CString::from(CStr::from_ptr(env.get_string(j_url).unwrap().as_ptr()));
+    let url = unwrapString(&env, url);
+    let host = unwrapString(&env, host);
+    let tab_host = unwrapString(&env, tab_host);
+    let resource_type = unwrapString(&env, resource_type);
+    let engine = unwrapEngine(&env, engine);
 
-    match_url(path.to_str().unwrap().to_owned())
+    let was_matched = previous_result & IS_MATCHED_MASK != 0;
+    let was_exception = previous_result & IS_EXCEPTION_MASK != 0;
+
+    let blocker_result = engine.check_network_urls_with_hostnames_subset(
+        &url,
+        &host,
+        &tab_host,
+        &resource_type,
+        Some(third_party),
+        // Checking normal rules is skipped if a normal rule or exception rule was found previously
+        was_matched || was_exception,
+        // Always check exceptions unless one was found previously
+        !was_exception,
+    );
+    debug!("New result for {:?} with {:?}", url, blocker_result);
+    let mut result: i8 = 0;
+    if blocker_result.matched { result |= IS_MATCHED_MASK; }
+    if !blocker_result.exception.is_none() { result |= IS_EXCEPTION_MASK; }
+    if blocker_result.important { result |= IS_IMPORTANT_MASK; };
+    result
 }
 
+
+/// Adds a tag to the engine for consideration
 #[no_mangle]
-pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_init(
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineEnableTag(
     env: JNIEnv,
     _: JObject,
-    j_path: JString,
+    engine: jlong,
+    tag: JString,
 ) {
     check_init();
-
-    let path = CString::from(CStr::from_ptr(env.get_string(j_path).unwrap().as_ptr()))
-        .to_str()
-        .unwrap()
-        .to_owned();
-    debug!("Will try to init with {:?}", path);
-
-    init(path);
+    let tag = unwrapString(&env, tag);
+    let engine = unwrapEngine(&env, engine);
+    engine.enable_tags(&[&tag]);
 }
 
-static mut ENGINE: Option<Engine> = None;
+/// Checks if a tag exists in the engine
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineTagExists(
+    env: JNIEnv,
+    _: JObject,
+    engine: jlong,
+    tag: JString,
+) -> bool {
+    check_init();
+    let tag = unwrapString(&env, tag);
+    let engine = unwrapEngine(&env, engine);
+    let res = engine.tag_exists(&tag);
+    debug!("Has tag {:?} {}", tag, res);
+    res
+}
 
-fn match_url(url: String) -> bool {
-    unsafe {
-        if let Some(engine) = &ENGINE {
-            let result = engine.check_network_urls(&url, "", "") as BlockerResult;
-            return result.matched;
-        }
+
+/// Removes a tag to the engine for consideration
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDisableTag(
+    env: JNIEnv,
+    _: JObject,
+    engine: jlong,
+    tag: JString,
+) {
+    check_init();
+    let tag = unwrapString(&env, tag);
+    let engine = unwrapEngine(&env, engine);
+    engine.disable_tags(&[&tag]);
+}
+
+/// Adds a resource to the engine by name
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResources(
+    env: JNIEnv,
+    _: JObject,
+    engine: jlong,
+    key: JString,
+    contentType: JString,
+    data: JString,
+) -> bool {
+    check_init();
+    let key = unwrapString(&env, key);
+    let contentType = unwrapString(&env, contentType);
+    let data = unwrapString(&env, data);
+    let engine = unwrapEngine(&env, engine);
+
+    let resource = Resource {
+        name: key.to_string(),
+        aliases: vec![],
+        kind: ResourceType::Mime(MimeType::from(std::borrow::Cow::from(contentType))),
+        content: data.to_string(),
+    };
+    engine.add_resource(resource).is_ok()
+}
+
+/// Adds a list of `Resource`s from JSON format
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResourceFromJson(
+    env: JNIEnv,
+    _: JObject,
+    engine: jlong,
+    resourcesJson: JString,
+) {
+    check_init();
+    let resourcesJson = unwrapString(&env, resourcesJson);
+    let engine = unwrapEngine(&env, engine);
+
+
+    let resources: Vec<Resource> = serde_json::from_str(&resourcesJson).unwrap_or_else(|e| {
+        error!("Failed to parse JSON adblock resources: {}", e);
+        vec![]
+    });
+
+    engine.use_resources(&resources);
+}
+
+
+/// Deserializes a previously serialized data file list.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserialize(
+    env: JNIEnv,
+    _: JObject,
+    engine: jlong,
+    data: jbyteArray,
+) -> bool {
+    check_init();
+    let data = env.convert_byte_array(data).unwrap();
+    let engine = unwrapEngine(&env, engine);
+    let ok = engine.deserialize(&data).is_ok();
+    if !ok {
+        eprintln!("Error deserializing adblock engine");
     }
-    false
+    ok
 }
 
-fn init(filepath: String) {
-    debug!("Deserializing engine");
-    // let engine = if let Some(engine) = unsafe { engine.as_ref() } { engine } else { panic!("No engine found") };
-    let mut engine = Engine::default();
-
-    let mut file = match File::open(&filepath) {
+/// Deserializes a previously serialized data file list from a local file path
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserializeFromFile(
+    env: JNIEnv,
+    _: JObject,
+    engine: jlong,
+    filePath: JString,
+) -> bool {
+    check_init();
+    let filePath = unwrapString(&env, filePath);
+    let engine = unwrapEngine(&env, engine);
+    debug!("Will try to deserialize engine from {:?}", filePath);
+    let mut file = match File::open(&filePath) {
         Err(why) => {
-            error!("couldn't open {}: {}", filepath, why);
-            panic!()
+            throwAndPanic!(&env, format!("couldn't open {:?}: {:?}", filePath, why))
         }
         Ok(file) => file,
     };
     let mut serialized = Vec::<u8>::new();
     file.read_to_end(&mut serialized)
         .expect("Reading from serialization file failed");
+    let ok = engine.deserialize(&serialized).is_ok();
+    if !ok {
+        error!("Error deserializing adblock engine");
+    }
+    ok
+}
 
-    // let mut file1 = File::open("rs-de.dat").expect("Opening serialization file failed");
-    // let mut serialized1 = Vec::<u8>::new();
-    // file1.read_to_end(&mut serialized1).expect("Reading from serialization file failed");
-    engine
-        .deserialize(&serialized)
-        .expect("Deserialization failed");
-    // engine.deserialize(&serialized1).expect("Deserialization failed of 1 ");
-    // engine = get_blocker_engine();
-    engine.use_tags(&["twitter-embeds"]);
+/// Destroy a `Engine` once you are done with it.
+#[no_mangle]
+pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDestroy(
+    _env: JNIEnv,
+    _: JObject,
+    engine: jlong) {
+    let enginePointer = engine as *mut Engine;
 
-    unsafe {
-        ENGINE = Some(engine);
+    if !enginePointer.is_null() {
+        debug!("Will dispose of engine {:?}", enginePointer);
+        drop(Box::from_raw(enginePointer));
     }
 }

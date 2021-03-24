@@ -3,26 +3,117 @@ package com.xayn.adblockeraar
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Test
+import java.io.File
+import java.io.FileInputStream
 
 class LoadingJniTest {
 
     @Test
-    fun `Expect jni loads correctly and Hello World works`() {
-        assertEquals("Hello Welt", Adblock.INSTANCE.hello("Welt"));
-    }
-
-    @Test
-    fun `Expect to store string in rust`() {
-        val pointer = Adblock.INSTANCE.store("Welt")
-        println("Rust pointer $pointer")
-        assertEquals("Welt", Adblock.INSTANCE.restore(pointer));
-    }
-
-
-    @Test
     fun `Expect to create a new Engine`() {
-        assertNotNull(Adblock.INSTANCE.createEngine(""));
+        assertNotNull(
+            Adblock.INSTANCE.createEngine(
+                "-advertisement-icon.\n" +
+                        "-advertisement-management\n" +
+                        "-advertisement.\n" +
+                        "-advertisement/script.\n" +
+                        "@@good-advertisement\n"
+            )
+        )
     }
 
+    @Test
+    fun `Expect to match a rule when path of usr is matching`() {
+        val engine = Adblock.INSTANCE.createEngine(
+            "-advertisement-icon.\n" +
+                    "-advertisement-management\n" +
+                    "-advertisement.\n" +
+                    "-advertisement/script.\n" +
+                    "@@good-advertisement\n"
+        )
 
+        val match = engine.match(
+            "http://example.com/-advertisement-icon.",
+            "http://example.com/helloworld",
+            "image"
+        )
+        assertEquals(true, match.isMatched)
+        assertEquals(false, match.isImportant)
+        assertEquals(false, match.isException)
+    }
+
+    @Test
+    fun `Expect to not match any rule`() {
+        val engine = Adblock.INSTANCE.createEngine(
+            "-advertisement-icon.\n" +
+                    "-advertisement-management\n" +
+                    "-advertisement.\n" +
+                    "-advertisement/script.\n" +
+                    "@@good-advertisement\n"
+        )
+
+        val match = engine.match(
+            "http://example.com/-jiberish.gif",
+            "http://example.com/helloworld",
+            "image"
+        )
+        assertEquals(false, match.isMatched)
+        assertEquals(false, match.isImportant)
+        assertEquals(false, match.isException)
+    }
+
+    @Test(expected = RuntimeException::class)
+    fun `After finalizing an Engine, any further match will crash`() {
+        val engine = Adblock.INSTANCE.createEngine(
+            "-advertisement-icon.\n" +
+                    "-advertisement-management\n" +
+                    "-advertisement.\n" +
+                    "-advertisement/script.\n" +
+                    "@@good-advertisement\n"
+        )
+
+        engine.destroy()
+
+        engine.match(
+            "",
+            "",
+            ""
+        )
+    }
+
+    @Test
+    fun `Deserialize engine from byte array`() {
+        val engine = Adblock.INSTANCE.createEngine()
+        val file = File("src/test/rs-ABPFilterParserData.dat")
+
+        engine.deserialize(FileInputStream(file))
+        val matchPosiitive = engine.match(
+            "https://www.googletagmanager.com/gtm.js?id=GTM-5LC93J" ,"https://www.guildwars2.com/en/", "script"
+        )
+
+        val matchNegative = engine.match(
+            "https://www.google.com" ,"https://www.google.com", "script"
+        )
+
+        assertEquals(true, matchPosiitive.isMatched)
+        assertEquals(false, matchNegative.isMatched)
+    }
+
+    @Test
+    fun `Deserialize engine from file`() {
+        val engine = Adblock.INSTANCE.createEngine()
+        val file = File("src/test/rs-ABPFilterParserData.dat")
+
+        engine.deserialize(file.absolutePath)
+
+        val matchPosiitive = engine.match(
+            "https://www.googletagmanager.com/gtm.js?id=GTM-5LC93J" ,"https://www.guildwars2.com/en/", "script"
+        )
+
+        val matchNegative = engine.match(
+            "https://www.google.com" ,"https://www.google.com", "script"
+        )
+
+        assertEquals(true, matchPosiitive.isMatched)
+        assertEquals(false, matchNegative.isMatched)
+    }
 }
