@@ -1,2 +1,3 @@
 rootProject.name = "Adblocker AAR"
 include ':lib'
+include ':webviewadblocker'

@@ -6,7 +6,7 @@ plugins {
     id "org.mozilla.rust-android-gradle.rust-android"
 }
 
-def buildType = gradle.startParameter.taskRequests.any {it.args[0].contains("Release")}  ? 'release' : 'debug'
+def buildType = gradle.startParameter.taskRequests.any {it.args[0]?.contains("Release")}  ? 'release' : 'debug'
 
 
 android {
@@ -44,8 +44,6 @@ android {
     }
 }
 
-
-
 cargo {
     OperatingSystem os = DefaultNativePlatform.currentOperatingSystem;
     def testTarget
@@ -59,7 +57,7 @@ cargo {
     module  = "../../rust"
     libname = "adblockerjni"
 
-    targets = ['arm64', 'arm', 'x86_64', testTarget]
+    targets = ['arm64', 'arm', 'x86_64', 'x86', testTarget]
     verbose = false
     prebuiltToolchains = true
     apiLevel = 21

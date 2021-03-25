@@ -1,13 +1,10 @@
 package com.xayn.adblockeraar;
 
 
-import android.net.Uri;
-
 import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.URI;
 
 import androidx.annotation.NonNull;
 
@@ -123,48 +120,5 @@ public enum Adblock implements AdblockService {
     }
 }
 
-interface AdblockService {
-    AdblockEngine createEngine(String rules);
-    AdblockEngine createEngine();
-}
 
-interface AdblockEngine {
-    AdblockResult match(String url, String host, String type);
-
-    void destroy();
-
-    boolean deserialize(InputStream stream) throws IOException;
-
-    boolean deserialize(String filePath);
-
-    void enableTag(@NotNull String tag);
-
-    void disableTag(@NotNull String tag);
-
-    boolean hasTag(@NotNull String tag);
-}
-
-class AdblockResult {
-    private final static byte IS_MATCHED_MASK = 1;
-    private final static byte IS_IMPORTANT_MASK = 2;
-    private final static byte IS_EXCEPTION_MASK = 4;
-
-    protected final byte nativeResult;
-
-    public AdblockResult(byte nativeResult) {
-        this.nativeResult = nativeResult;
-    }
-
-    public boolean isMatched() {
-        return (nativeResult & IS_MATCHED_MASK) != 0;
-    }
-
-    public boolean isImportant() {
-        return (nativeResult & IS_IMPORTANT_MASK) != 0;
-    }
-
-    public boolean isException() {
-        return (nativeResult & IS_EXCEPTION_MASK) != 0;
-    }
-}
 

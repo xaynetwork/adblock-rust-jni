@@ -109,7 +109,7 @@ class LoadingJniTest {
             "https://www.googletagmanager.com/gtm.js?id=GTM-5LC93J" ,"https://www.guildwars2.com/en/", "script"
         )
 
-        val matchNegative = engine.match(
+        val matchNegative = engine. match(
             "https://www.google.com" ,"https://www.google.com", "script"
         )
 
