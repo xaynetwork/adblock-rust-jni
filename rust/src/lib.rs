@@ -1,18 +1,22 @@
 #![allow(non_snake_case)]
 #[macro_use]
 extern crate log;
+#[cfg(target_os = "android")]
 extern crate android_logger;
 
 use adblock::engine::Engine;
-use android_logger::Config;
+#[cfg(target_os = "android")]
+use {android_logger::Config, log::Level};
+
+use adblock::resources::{MimeType, Resource, ResourceType};
 use jni::objects::{JObject, JString};
 use jni::sys::{jlong, jbyte, jbyteArray};
 use jni::JNIEnv;
-use log::{Level, LevelFilter};
+#[cfg(not(target_os = "android"))]
+use {log::LevelFilter, env_logger::Builder};
 use std::fs::File;
 use std::io::prelude::*;
-use env_logger::Builder;
-use adblock::resources::{Resource, ResourceType, MimeType};
+use std::sync::Once;
 
 macro_rules! throwAndPanic {
     ($env:expr,$message:expr)=>{
@@ -24,25 +28,31 @@ macro_rules! throwAndPanic {
     }
 }
 
-static mut IS_INITIALIZED: bool = false;
+
 const IS_MATCHED_MASK: i8 = 1;
 const IS_IMPORTANT_MASK: i8 = 2;
 const IS_EXCEPTION_MASK: i8 = 4;
 
 
-unsafe fn check_init() {
-    if !IS_INITIALIZED {
-        if cfg!(android) {
-            android_logger::init_once(Config::default().with_min_level(Level::Debug));
-        } else {
-            println!("init logger");
-            let mut builder = Builder::new();
-            builder.filter_level(LevelFilter::Debug);
-            builder.init();
-        };
-        IS_INITIALIZED = true;
-    }
+static START: Once = Once::new();
+
+
+#[cfg(target_os = "android")]
+fn check_init() {
+    START.call_once(|| {
+        android_logger::init_once(Config::default().with_min_level(Level::Debug));
+    });
 }
+
+#[cfg(not(target_os = "android"))]
+fn check_init() {
+    START.call_once(|| {
+        let mut builder = Builder::new();
+        builder.filter_level(LevelFilter::Debug);
+        builder.init();
+    });
+}
+
 
 unsafe fn unwrapString(env: &JNIEnv, jString: JString) -> String {
     let loadedRules: String = match env.get_string(jString) {
@@ -155,7 +165,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_simpleMatch(
     if blocker_result.important { result |= IS_IMPORTANT_MASK; };
     result
 }
-
 
 
 /// Checks if a `url` matches for the specified `Engine` within the context.
