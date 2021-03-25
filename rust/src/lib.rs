@@ -1,8 +1,7 @@
 #![allow(non_snake_case)]
-#[macro_use]
-extern crate log;
+use log::{error, debug};
 #[cfg(target_os = "android")]
-extern crate android_logger;
+use android_logger;
 
 use adblock::engine::Engine;
 #[cfg(target_os = "android")]
