@@ -47,5 +47,8 @@ cd aar
 - Add more documenation on the Adblocker interface
 - create tests for tags and resources
 - create benchmark
+- add android example project with webview 
+- publish aar as version 0.1.0 in jitpack
+- add verification on CI 
 
  
