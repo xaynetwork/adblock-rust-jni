@@ -10,22 +10,21 @@ use {android_logger::Config, log::Level};
 
 use adblock::resources::{MimeType, Resource, ResourceType};
 use jni::objects::{JObject, JString};
-use jni::sys::{jlong, jbyte, jbyteArray};
+use jni::sys::{jbyte, jbyteArray, jlong};
 use jni::JNIEnv;
-#[cfg(not(target_os = "android"))]
-use {log::LevelFilter, env_logger::Builder};
 use std::fs::File;
 use std::io::prelude::*;
 use std::sync::Once;
+#[cfg(not(target_os = "android"))]
+use {env_logger::Builder, log::LevelFilter};
 
 macro_rules! throwAndPanic {
-    ($env:expr,$message:expr)=>{
-        {
-            $env.throw_new("java/lang/RuntimeException", $message).expect("Can not throw exception in java env");
-            error!("{}", $message);
-            panic!("{}", $message)
-        }
-    }
+    ($env:expr,$message:expr) => {{
+        $env.throw_new("java/lang/RuntimeException", $message)
+            .expect("Can not throw exception in java env");
+        error!("{}", $message);
+        panic!("{}", $message)
+    }};
 }
 
 const IS_MATCHED_MASK: i8 = 1;
@@ -52,9 +51,7 @@ fn check_init() {
 
 unsafe fn unwrapString(env: &JNIEnv, jString: JString) -> String {
     let loadedRules: String = match env.get_string(jString) {
-        Err(why) => {
-            throwAndPanic!(env, format!("Could not convert JString to String: {}", why))
-        }
+        Err(why) => throwAndPanic!(env, format!("Could not convert JString to String: {}", why)),
         Ok(str) => str.into(),
     };
     loadedRules
@@ -65,11 +62,10 @@ unsafe fn unwrapEngine<'a>(env: &'a JNIEnv, enginePointer: jlong) -> &'a mut Eng
     let engine = if let Some(restored) = enginePointer.as_mut() {
         restored
     } else {
-        throwAndPanic!(&env,  "Engine is not allocated anymore!")
+        throwAndPanic!(&env, "Engine is not allocated anymore!")
     };
     engine
 }
-
 
 /// An external callback that receives a hostname and two out-parameters for start and end
 /// position. The callback should fill the start and end positions with the start and end indices
@@ -104,7 +100,6 @@ unsafe fn unwrapEngine<'a>(env: &'a JNIEnv, enginePointer: jlong) -> &'a mut Eng
 //
 //     adblock::url_parser::set_domain_resolver(Box::new(RemoteResolverImpl { remote_callback: resolver })).is_ok()
 // }
-
 
 /// Create a new `Engine`.
 #[no_mangle]
@@ -145,27 +140,27 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_simpleMatch(
     url: JString,
     host: JString,
     resource_type: JString,
-) -> jbyte
-{
+) -> jbyte {
     check_init();
     let url = unwrapString(&env, url);
     let host = unwrapString(&env, host);
     let resource_type = unwrapString(&env, resource_type);
     let engine = unwrapEngine(&env, engine);
 
-    let blocker_result = engine.check_network_urls(
-        &url,
-        &host,
-        &resource_type,
-    );
+    let blocker_result = engine.check_network_urls(&url, &host, &resource_type);
     debug!("New result for {:?} with {:?}", url, blocker_result);
     let mut result: i8 = 0;
-    if blocker_result.matched { result |= IS_MATCHED_MASK; }
-    if blocker_result.exception.is_some() { result |= IS_EXCEPTION_MASK; }
-    if blocker_result.important { result |= IS_IMPORTANT_MASK; };
+    if blocker_result.matched {
+        result |= IS_MATCHED_MASK;
+    }
+    if blocker_result.exception.is_some() {
+        result |= IS_EXCEPTION_MASK;
+    }
+    if blocker_result.important {
+        result |= IS_IMPORTANT_MASK;
+    };
     result
 }
-
 
 /// Checks if a `url` matches for the specified `Engine` within the context.
 ///
@@ -181,8 +176,7 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_match(
     third_party: bool,
     resource_type: JString,
     previous_result: jbyte,
-) -> jbyte
-{
+) -> jbyte {
     check_init();
     let url = unwrapString(&env, url);
     let host = unwrapString(&env, host);
@@ -206,12 +200,17 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_match(
     );
     debug!("New result for {:?} with {:?}", url, blocker_result);
     let mut result: i8 = 0;
-    if blocker_result.matched { result |= IS_MATCHED_MASK; }
-    if blocker_result.exception.is_some() { result |= IS_EXCEPTION_MASK; }
-    if blocker_result.important { result |= IS_IMPORTANT_MASK; };
+    if blocker_result.matched {
+        result |= IS_MATCHED_MASK;
+    }
+    if blocker_result.exception.is_some() {
+        result |= IS_EXCEPTION_MASK;
+    }
+    if blocker_result.important {
+        result |= IS_IMPORTANT_MASK;
+    };
     result
 }
-
 
 /// Adds a tag to the engine for consideration
 #[no_mangle]
@@ -242,7 +241,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineTagExists(
     debug!("Has tag {:?} {}", tag, res);
     res
 }
-
 
 /// Removes a tag to the engine for consideration
 #[no_mangle]
@@ -295,7 +293,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResourceFro
     let resourcesJson = unwrapString(&env, resourcesJson);
     let engine = unwrapEngine(&env, engine);
 
-
     let resources: Vec<Resource> = serde_json::from_str(&resourcesJson).unwrap_or_else(|e| {
         error!("Failed to parse JSON adblock resources: {}", e);
         vec![]
@@ -303,7 +300,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResourceFro
 
     engine.use_resources(&resources);
 }
-
 
 /// Deserializes a previously serialized data file list.
 #[no_mangle]
@@ -336,9 +332,7 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserializeFro
     let engine = unwrapEngine(&env, engine);
     debug!("Will try to deserialize engine from {:?}", filePath);
     let mut file = match File::open(&filePath) {
-        Err(why) => {
-            throwAndPanic!(&env, format!("couldn't open {:?}: {:?}", filePath, why))
-        }
+        Err(why) => throwAndPanic!(&env, format!("couldn't open {:?}: {:?}", filePath, why)),
         Ok(file) => file,
     };
     let mut serialized = Vec::<u8>::new();
@@ -356,7 +350,8 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserializeFro
 pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDestroy(
     _env: JNIEnv,
     _: JObject,
-    engine: jlong) {
+    engine: jlong,
+) {
     let enginePointer = engine as *mut Engine;
 
     if !enginePointer.is_null() {
