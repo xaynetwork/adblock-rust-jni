@@ -11,6 +11,11 @@ import androidx.annotation.NonNull;
 public enum Adblock implements AdblockService {
     INSTANCE;
 
+    private static final byte ERROR = -1;
+    private static final long NULL_POINTER = 0;
+    private static final byte TRUE = 1;
+    private static final byte FALSE = 0;
+
     private class AdblockEngineImpl implements AdblockEngine {
 
         private final long pointer;
@@ -33,12 +38,12 @@ public enum Adblock implements AdblockService {
             if (stream.read(targetArray) == -1) {
                 return false;
             }
-            return engineDeserialize(pointer, targetArray);
+            return checkValidAndConvertToBoolean(engineDeserialize(pointer, targetArray));
         }
 
         @Override
         public boolean deserialize(String filePath) {
-            return engineDeserializeFromFile(pointer, filePath);
+            return checkValidAndConvertToBoolean(engineDeserializeFromFile(pointer, filePath));
         }
 
         @Override
@@ -53,7 +58,7 @@ public enum Adblock implements AdblockService {
 
         @Override
         public boolean hasTag(@NotNull String tag) {
-            return engineTagExists(pointer, tag);
+            return checkValidAndConvertToBoolean(engineTagExists(pointer, tag));
         }
 
         @Override
@@ -73,6 +78,15 @@ public enum Adblock implements AdblockService {
                 throw new RuntimeException("Engine was used after calling destroyed");
             }
         }
+
+        private boolean checkValidAndConvertToBoolean(byte result) {
+            if (result == ERROR || (result > TRUE || result < ERROR)) {
+                throw new RuntimeException("Received an error code during native operation, usually a native Exception should have been propagated, which means that the JNI throw method did not work.");
+            }
+            return result == TRUE;
+        }
+
+
     }
 
     static {
@@ -91,31 +105,37 @@ public enum Adblock implements AdblockService {
 
     private native void engineEnableTag(long pointer, String tag);
 
-    private native boolean engineTagExists(long pointer, String tag);
+    private native byte engineTagExists(long pointer, String tag);
 
     private native void engineDisableTag(long pointer, String tag);
 
-    private native boolean engineAddResource(long pointer, String key, String contentType, String data);
+    private native byte engineAddResource(long pointer, String key, String contentType, String data);
 
     private native void engineAddResourcesFromJson(long pointer, String resourcesJson);
 
-    private native boolean engineDeserialize(long pointer, byte[] data);
+    private native byte engineDeserialize(long pointer, byte[] data);
 
-    private native boolean engineDeserializeFromFile(long pointer, String filePath);
+    private native byte engineDeserializeFromFile(long pointer, String filePath);
 
+    private long checkValid(long result) {
+        if (result == NULL_POINTER) {
+            throw new RuntimeException("Received an error code during native operation, usually a native Exception should have been propagated, which means that the JNI throw method did not work.");
+        }
+        return result;
+    }
 
     @Override
     public AdblockEngine createEngine(String rules) {
         if (rules == null || rules.isEmpty()) {
             return createEngine();
         }
-        long pointer = engineCreate(rules);
+        long pointer = checkValid(engineCreate(rules));
         return new AdblockEngineImpl(pointer);
     }
 
     @Override
     public AdblockEngine createEngine() {
-        long pointer = engineCreateDefault();
+        long pointer = checkValid(engineCreateDefault());
         return new AdblockEngineImpl(pointer);
     }
 }

@@ -11,6 +11,8 @@ import android.view.Menu
 import android.view.MenuItem
 import com.xayn.adblocker.webviewadblocker.databinding.ActivityMainBinding
 import com.xayn.adblockeraar.Adblock
+import java.lang.Exception
+import java.lang.RuntimeException
 
 class MainActivity : AppCompatActivity() {
 
@@ -57,7 +59,15 @@ class MainActivity : AppCompatActivity() {
             error("Assertion failed")
         }
 
-        engine.deserialize("bla/blas");
+        engine.hasTag("Bla")
+
+        try {
+            engine.deserialize("bla/blas")
+        } catch (e : Exception) {
+            e.printStackTrace();
+        }
+
+
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {

@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+
 use log::{error, debug};
 #[cfg(target_os = "android")]
 use android_logger;
@@ -16,19 +17,17 @@ use std::io::prelude::*;
 use std::sync::Once;
 #[cfg(not(target_os = "android"))]
 use {env_logger::Builder, log::LevelFilter};
+use std::panic::{catch_unwind, UnwindSafe};
 
-macro_rules! throwAndPanic {
-    ($env:expr,$message:expr) => {{
-        $env.throw_new("java/lang/RuntimeException", $message)
-            .expect("Can not throw exception in java env");
-        error!("{}", $message);
-        panic!("{}", $message)
-    }};
-}
 
 const IS_MATCHED_MASK: i8 = 1;
 const IS_IMPORTANT_MASK: i8 = 2;
 const IS_EXCEPTION_MASK: i8 = 4;
+const ERROR: jbyte = -1;
+const NULL_POINTER: jlong = 0;
+const TRUE: jbyte = 1;
+const FALSE: jbyte = 0;
+
 
 static START: Once = Once::new();
 
@@ -50,20 +49,51 @@ fn check_init() {
 
 fn unwrapString(env: &JNIEnv, jString: JString) -> String {
     let loadedRules: String = match env.get_string(jString) {
-        Err(why) => throwAndPanic!(env, format!("Could not convert JString to String: {}", why)),
+        Err(why) => panic!("Could not convert JString to String: {}", why),
         Ok(str) => str.into(),
     };
     loadedRules
 }
 
-fn unwrapEngine<'a>(env: &'a JNIEnv, enginePointer: jlong) -> &'a mut Engine {
+fn unwrapEngine<'a>(enginePointer: jlong) -> &'a mut Engine {
     let enginePointer = enginePointer as *mut Engine;
     let engine = if let Some(restored) = unsafe { enginePointer.as_mut() } {
         restored
     } else {
-        throwAndPanic!(&env, "Engine is not allocated anymore!")
+        panic!("Engine is not allocated anymore!")
     };
     engine
+}
+
+fn catch_and_forward_exceptions_bool<F: FnOnce() -> bool + UnwindSafe>(env: &JNIEnv, f: F) -> jbyte {
+    _catch_and_forward_exceptions(env, f, |v| { if v { TRUE } else { FALSE } }, ERROR)
+}
+
+fn catch_and_forward_exceptions_jlong<F: FnOnce() -> jlong + UnwindSafe>(env: &JNIEnv, f: F) -> jlong {
+    _catch_and_forward_exceptions(env, f, |v| { v }, NULL_POINTER)
+}
+
+fn catch_and_forward_exceptions_jbyte<F: FnOnce() -> jbyte + UnwindSafe>(env: &JNIEnv, f: F) -> jbyte {
+    _catch_and_forward_exceptions(env, f, |v| { v }, ERROR)
+}
+
+fn catch_and_forward_exceptions_void<F: FnOnce() -> R + UnwindSafe, R>(env: &JNIEnv, f: F) -> () {
+    _catch_and_forward_exceptions(env, f, |_| { () }, ())
+}
+
+fn _catch_and_forward_exceptions<F: FnOnce() -> R + UnwindSafe, C: FnOnce(R) -> RES, R, RES>(env: &JNIEnv, f: F, convert: C, error_value: RES) -> RES {
+    match catch_unwind(f) {
+        Ok(v) => {
+            convert(v)
+        }
+        Err(err) => {
+            error!("Will throw panic: {:?}", err);
+            env.throw(format!("{:?}", err)).unwrap_or_else(|err2| {
+                error!("Could not throw error that initially was {:?} : {:?}", err, err2)
+            });
+            error_value
+        }
+    }
 }
 
 /// An external callback that receives a hostname and two out-parameters for start and end
@@ -107,11 +137,13 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineCreate(
     _: JObject,
     rules: JString,
 ) -> jlong {
-    check_init();
-    let loadedRules = unwrapString(&env, rules);
+    catch_and_forward_exceptions_jlong(&env, || {
+        check_init();
+        let loadedRules = unwrapString(&env, rules);
 
-    let engine = _engineCreate(&loadedRules);
-    Box::into_raw(Box::new(engine)) as jlong
+        let engine = _engineCreate(&loadedRules);
+        Box::into_raw(Box::new(engine)) as jlong
+    })
 }
 
 fn _engineCreate(loadedRules: &String) -> Engine {
@@ -125,12 +157,14 @@ fn _engineCreate(loadedRules: &String) -> Engine {
 /// Create a new `Engine`.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineCreateDefault(
-    _env: JNIEnv,
+    env: JNIEnv,
     _: JObject,
 ) -> jlong {
-    check_init();
-    let engine = Engine::default();
-    Box::into_raw(Box::new(engine)) as jlong
+    catch_and_forward_exceptions_jlong(&env, || {
+        check_init();
+        let engine = Engine::default();
+        Box::into_raw(Box::new(engine)) as jlong
+    })
 }
 
 /// Checks if a `url` matches for the specified `Engine` within the context.
@@ -145,14 +179,17 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_simpleMatch(
     host: JString,
     resource_type: JString,
 ) -> jbyte {
-    check_init();
-    let url = unwrapString(&env, url);
-    let host = unwrapString(&env, host);
-    let resource_type = unwrapString(&env, resource_type);
-    let engine = unwrapEngine(&env, engine);
+    catch_and_forward_exceptions_jbyte(&env, || {
+        check_init();
+        let url = unwrapString(&env, url);
+        let host = unwrapString(&env, host);
+        let resource_type = unwrapString(&env, resource_type);
+        let engine = unwrapEngine(engine);
 
-    _simpleMatch(&url, &host, &resource_type, engine)
+        _simpleMatch(&url, &host, &resource_type, engine)
+    })
 }
+
 
 fn _simpleMatch(url: &String, host: &String, resource_type: &String, engine: &mut Engine) -> i8 {
     let blocker_result = engine.check_network_urls(&url, &host, &resource_type);
@@ -185,14 +222,16 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_match(
     resource_type: JString,
     previous_result: jbyte,
 ) -> jbyte {
-    check_init();
-    let url = unwrapString(&env, url);
-    let host = unwrapString(&env, host);
-    let tab_host = unwrapString(&env, tab_host);
-    let resource_type = unwrapString(&env, resource_type);
-    let engine = unwrapEngine(&env, engine);
+    catch_and_forward_exceptions_jbyte(&env, || {
+        check_init();
+        let url = unwrapString(&env, url);
+        let host = unwrapString(&env, host);
+        let tab_host = unwrapString(&env, tab_host);
+        let resource_type = unwrapString(&env, resource_type);
+        let engine = unwrapEngine(engine);
 
-    _match(third_party, previous_result, &url, &host, &tab_host, &resource_type, engine)
+        _match(third_party, previous_result, &url, &host, &tab_host, &resource_type, engine)
+    })
 }
 
 fn _match(third_party: bool, previous_result: i8, url: &String, host: &String, tab_host: &String, resource_type: &String, engine: &mut Engine) -> i8 {
@@ -232,10 +271,12 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineEnableTag(
     engine: jlong,
     tag: JString,
 ) {
-    check_init();
-    let tag = unwrapString(&env, tag);
-    let engine = unwrapEngine(&env, engine);
-    engine.enable_tags(&[&tag]);
+    catch_and_forward_exceptions_void(&env, || {
+        check_init();
+        let tag = unwrapString(&env, tag);
+        let engine = unwrapEngine(engine);
+        engine.enable_tags(&[&tag]);
+    });
 }
 
 /// Checks if a tag exists in the engine
@@ -245,13 +286,15 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineTagExists(
     _: JObject,
     engine: jlong,
     tag: JString,
-) -> bool {
-    check_init();
-    let tag = unwrapString(&env, tag);
-    let engine = unwrapEngine(&env, engine);
-    let res = engine.tag_exists(&tag);
-    debug!("Has tag {:?} {}", tag, res);
-    res
+) -> jbyte {
+    catch_and_forward_exceptions_bool(&env, || {
+        check_init();
+        let tag = unwrapString(&env, tag);
+        let engine = unwrapEngine(engine);
+        let res = engine.tag_exists(&tag);
+        debug!("Has tag {:?} {}", tag, res);
+        res
+    })
 }
 
 /// Removes a tag to the engine for consideration
@@ -262,10 +305,12 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDisableTag(
     engine: jlong,
     tag: JString,
 ) {
-    check_init();
-    let tag = unwrapString(&env, tag);
-    let engine = unwrapEngine(&env, engine);
-    engine.disable_tags(&[&tag]);
+    catch_and_forward_exceptions_void(&env, || {
+        check_init();
+        let tag = unwrapString(&env, tag);
+        let engine = unwrapEngine(engine);
+        engine.disable_tags(&[&tag]);
+    });
 }
 
 /// Adds a resource to the engine by name
@@ -277,14 +322,16 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResources(
     key: JString,
     contentType: JString,
     data: JString,
-) -> bool {
-    check_init();
-    let key = unwrapString(&env, key);
-    let contentType = unwrapString(&env, contentType);
-    let data = unwrapString(&env, data);
-    let engine = unwrapEngine(&env, engine);
+) -> jbyte {
+    catch_and_forward_exceptions_bool(&env, || {
+        check_init();
+        let key = unwrapString(&env, key);
+        let contentType = unwrapString(&env, contentType);
+        let data = unwrapString(&env, data);
+        let engine = unwrapEngine(engine);
 
-    _addResources(key, contentType, data, engine)
+        _addResources(key, contentType, data, engine)
+    })
 }
 
 fn _addResources(key: String, contentType: String, data: String, engine: &mut Engine) -> bool {
@@ -305,11 +352,13 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResourceFro
     engine: jlong,
     resourcesJson: JString,
 ) {
-    check_init();
-    let resourcesJson = unwrapString(&env, resourcesJson);
-    let engine = unwrapEngine(&env, engine);
+    catch_and_forward_exceptions_void(&env, || {
+        check_init();
+        let resourcesJson = unwrapString(&env, resourcesJson);
+        let engine = unwrapEngine(engine);
 
-    _addResourcesFromJson(&resourcesJson, engine);
+        _addResourcesFromJson(&resourcesJson, engine);
+    })
 }
 
 fn _addResourcesFromJson(resourcesJson: &String, engine: &mut Engine) {
@@ -328,16 +377,25 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserialize(
     _: JObject,
     engine: jlong,
     data: jbyteArray,
-) -> bool {
-    check_init();
-    let data = env.convert_byte_array(data).unwrap();
-    let engine = unwrapEngine(&env, engine);
-    let ok = engine.deserialize(&data).is_ok();
-    if !ok {
-        error!("Error deserializing adblock engine");
-    }
-    ok
+) -> jbyte {
+    catch_and_forward_exceptions_bool(&env, || {
+        check_init();
+        let data = env.convert_byte_array(data).unwrap();
+        let engine = unwrapEngine(engine);
+        _deserialize(&data, engine)
+    })
 }
+
+fn _deserialize(data: &Vec<u8>, engine: &mut Engine) -> bool {
+    match engine.deserialize(&data) {
+        Ok(_) => true,
+        Err(why) => {
+            error!("Could not deserialize Engine because {:?}", why);
+            false
+        }
+    }
+}
+
 
 /// Deserializes a previously serialized data file list from a local file path
 #[no_mangle]
@@ -346,40 +404,47 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserializeFro
     _: JObject,
     engine: jlong,
     filePath: JString,
-) -> bool {
-    check_init();
-    let filePath = unwrapString(&env, filePath);
-    let engine = unwrapEngine(&env, engine);
-    _deserializeFromFile(&env, &filePath, engine)
+) -> jbyte {
+    catch_and_forward_exceptions_bool(&env, || {
+        check_init();
+        let filePath = unwrapString(&env, filePath);
+        let engine = unwrapEngine(engine);
+        _deserializeFromFile(&filePath, engine)
+    })
 }
 
-fn _deserializeFromFile(env: &JNIEnv, filePath: &String, engine: &mut Engine) -> bool {
+fn _deserializeFromFile(filePath: &String, engine: &mut Engine) -> bool {
     debug!("Will try to deserialize engine from {:?}", filePath);
     let mut file = match File::open(&filePath) {
-        Err(why) => throwAndPanic!(&env, format!("couldn't open {:?}: {:?}", filePath, why)),
+        Err(why) => panic!("couldn't open {:?}: {:?}", filePath, why),
         Ok(file) => file,
     };
     let mut serialized = Vec::<u8>::new();
     file.read_to_end(&mut serialized)
         .expect("Reading from serialization file failed");
-    let ok = engine.deserialize(&serialized).is_ok();
-    if !ok {
-        error!("Error deserializing adblock engine");
+
+    match engine.deserialize(&serialized) {
+        Ok(_) => true,
+        Err(why) => {
+            error!("Could not deserialize Engine because {:?}", why);
+            false
+        }
     }
-    ok
 }
 
 /// Destroy a `Engine` once you are done with it.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDestroy(
-    _env: JNIEnv,
+    env: JNIEnv,
     _: JObject,
     engine: jlong,
 ) {
-    let enginePointer = engine as *mut Engine;
+    catch_and_forward_exceptions_void(&env, || {
+        let enginePointer = engine as *mut Engine;
 
-    if !enginePointer.is_null() {
-        debug!("Will dispose of engine {:?}", enginePointer);
-        Box::from_raw(enginePointer);
-    }
+        if !enginePointer.is_null() {
+            debug!("Will dispose of engine {:?}", enginePointer);
+            Box::from_raw(enginePointer);
+        }
+    });
 }
