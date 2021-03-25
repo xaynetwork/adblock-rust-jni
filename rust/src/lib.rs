@@ -28,14 +28,11 @@ macro_rules! throwAndPanic {
     }
 }
 
-
 const IS_MATCHED_MASK: i8 = 1;
 const IS_IMPORTANT_MASK: i8 = 2;
 const IS_EXCEPTION_MASK: i8 = 4;
 
-
 static START: Once = Once::new();
-
 
 #[cfg(target_os = "android")]
 fn check_init() {
@@ -53,7 +50,6 @@ fn check_init() {
     });
 }
 
-
 unsafe fn unwrapString(env: &JNIEnv, jString: JString) -> String {
     let loadedRules: String = match env.get_string(jString) {
         Err(why) => {
@@ -64,9 +60,13 @@ unsafe fn unwrapString(env: &JNIEnv, jString: JString) -> String {
     loadedRules
 }
 
-unsafe fn unwrapEngine<'a>(env: &'a JNIEnv, enginePointer: i64) -> &'a mut Engine {
+unsafe fn unwrapEngine<'a>(env: &'a JNIEnv, enginePointer: jlong) -> &'a mut Engine {
     let enginePointer = enginePointer as *mut Engine;
-    let engine = if let Some(restored) = enginePointer.as_mut() { restored } else { throwAndPanic!(&env,  "Engine is not allocated anymore!") };
+    let engine = if let Some(restored) = enginePointer.as_mut() {
+        restored
+    } else {
+        throwAndPanic!(&env,  "Engine is not allocated anymore!")
+    };
     engine
 }
 
@@ -161,7 +161,7 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_simpleMatch(
     debug!("New result for {:?} with {:?}", url, blocker_result);
     let mut result: i8 = 0;
     if blocker_result.matched { result |= IS_MATCHED_MASK; }
-    if !blocker_result.exception.is_none() { result |= IS_EXCEPTION_MASK; }
+    if blocker_result.exception.is_some() { result |= IS_EXCEPTION_MASK; }
     if blocker_result.important { result |= IS_IMPORTANT_MASK; };
     result
 }
@@ -207,7 +207,7 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_match(
     debug!("New result for {:?} with {:?}", url, blocker_result);
     let mut result: i8 = 0;
     if blocker_result.matched { result |= IS_MATCHED_MASK; }
-    if !blocker_result.exception.is_none() { result |= IS_EXCEPTION_MASK; }
+    if blocker_result.exception.is_some() { result |= IS_EXCEPTION_MASK; }
     if blocker_result.important { result |= IS_IMPORTANT_MASK; };
     result
 }
@@ -361,6 +361,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDestroy(
 
     if !enginePointer.is_null() {
         debug!("Will dispose of engine {:?}", enginePointer);
-        drop(Box::from_raw(enginePointer));
+        Box::from_raw(enginePointer);
     }
 }
