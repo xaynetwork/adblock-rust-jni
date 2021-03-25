@@ -116,7 +116,7 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineCreate(
 /// Create a new `Engine`.
 #[no_mangle]
 pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineCreateDefault(
-    env: JNIEnv,
+    _env: JNIEnv,
     _: JObject,
 ) -> jlong {
     check_init();

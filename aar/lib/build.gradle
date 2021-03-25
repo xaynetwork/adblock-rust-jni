@@ -1,8 +1,13 @@
+import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
+
 plugins {
     id 'com.android.library'
     id 'kotlin-android'
     id "org.mozilla.rust-android-gradle.rust-android"
 }
+
+def buildType = gradle.startParameter.taskRequests.any {it.args[0].contains("Release")}  ? 'release' : 'debug'
+
 
 android {
     compileSdkVersion 30
@@ -42,14 +47,25 @@ android {
 
 
 cargo {
+    OperatingSystem os = DefaultNativePlatform.currentOperatingSystem;
+    def testTarget
+    if (os.isMacOsX()) {
+        testTarget = "darwin"
+    } else if (os.isWindows()) {
+        testTarget = "win32-x86-64-gnu"
+    } else {
+        testTarget = "linux-x86-64"
+    }
     module  = "../../rust"
     libname = "adblockerjni"
-    //"arm64", "arm", "x86_64",
-    targets = ['darwin']
+
+    targets = ['arm64', 'arm', 'x86_64', testTarget]
     verbose = false
     prebuiltToolchains = true
     apiLevel = 21
     targetIncludes = ['libadblockerjni.so']
+    println('buildType ' + buildType)
+    profile = buildType
 }
 
 tasks.whenTaskAdded { task ->
