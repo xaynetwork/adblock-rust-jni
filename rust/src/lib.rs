@@ -48,7 +48,7 @@ fn check_init() {
     });
 }
 
-unsafe fn unwrapString(env: &JNIEnv, jString: JString) -> String {
+fn unwrapString(env: &JNIEnv, jString: JString) -> String {
     let loadedRules: String = match env.get_string(jString) {
         Err(why) => throwAndPanic!(env, format!("Could not convert JString to String: {}", why)),
         Ok(str) => str.into(),
@@ -56,9 +56,9 @@ unsafe fn unwrapString(env: &JNIEnv, jString: JString) -> String {
     loadedRules
 }
 
-unsafe fn unwrapEngine<'a>(env: &'a JNIEnv, enginePointer: jlong) -> &'a mut Engine {
+fn unwrapEngine<'a>(env: &'a JNIEnv, enginePointer: jlong) -> &'a mut Engine {
     let enginePointer = enginePointer as *mut Engine;
-    let engine = if let Some(restored) = enginePointer.as_mut() {
+    let engine = if let Some(restored) = unsafe { enginePointer.as_mut() } {
         restored
     } else {
         throwAndPanic!(&env, "Engine is not allocated anymore!")
@@ -110,11 +110,16 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineCreate(
     check_init();
     let loadedRules = unwrapString(&env, rules);
 
+    let engine = _engineCreate(&loadedRules);
+    Box::into_raw(Box::new(engine)) as jlong
+}
+
+fn _engineCreate(loadedRules: &String) -> Engine {
     let mut filter_set = adblock::lists::FilterSet::new(false);
     debug!("Created filter_set with {:?}", &loadedRules);
     filter_set.add_filter_list(&loadedRules, adblock::lists::FilterFormat::Standard);
     let engine = Engine::from_filter_set(filter_set, true);
-    Box::into_raw(Box::new(engine)) as jlong
+    engine
 }
 
 /// Create a new `Engine`.
@@ -146,6 +151,10 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_simpleMatch(
     let resource_type = unwrapString(&env, resource_type);
     let engine = unwrapEngine(&env, engine);
 
+    _simpleMatch(&url, &host, &resource_type, engine)
+}
+
+fn _simpleMatch(url: &String, host: &String, resource_type: &String, engine: &mut Engine) -> i8 {
     let blocker_result = engine.check_network_urls(&url, &host, &resource_type);
     debug!("New result for {:?} with {:?}", url, blocker_result);
     let mut result: i8 = 0;
@@ -183,6 +192,10 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_match(
     let resource_type = unwrapString(&env, resource_type);
     let engine = unwrapEngine(&env, engine);
 
+    _match(third_party, previous_result, &url, &host, &tab_host, &resource_type, engine)
+}
+
+fn _match(third_party: bool, previous_result: i8, url: &String, host: &String, tab_host: &String, resource_type: &String, engine: &mut Engine) -> i8 {
     let was_matched = previous_result & IS_MATCHED_MASK != 0;
     let was_exception = previous_result & IS_EXCEPTION_MASK != 0;
 
@@ -271,6 +284,10 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResources(
     let data = unwrapString(&env, data);
     let engine = unwrapEngine(&env, engine);
 
+    _addResources(key, contentType, data, engine)
+}
+
+fn _addResources(key: String, contentType: String, data: String, engine: &mut Engine) -> bool {
     let resource = Resource {
         name: key.to_string(),
         aliases: vec![],
@@ -292,6 +309,10 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResourceFro
     let resourcesJson = unwrapString(&env, resourcesJson);
     let engine = unwrapEngine(&env, engine);
 
+    _addResourcesFromJson(&resourcesJson, engine);
+}
+
+fn _addResourcesFromJson(resourcesJson: &String, engine: &mut Engine) {
     let resources: Vec<Resource> = serde_json::from_str(&resourcesJson).unwrap_or_else(|e| {
         error!("Failed to parse JSON adblock resources: {}", e);
         vec![]
@@ -313,7 +334,7 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserialize(
     let engine = unwrapEngine(&env, engine);
     let ok = engine.deserialize(&data).is_ok();
     if !ok {
-        eprintln!("Error deserializing adblock engine");
+        error!("Error deserializing adblock engine");
     }
     ok
 }
@@ -329,6 +350,10 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserializeFro
     check_init();
     let filePath = unwrapString(&env, filePath);
     let engine = unwrapEngine(&env, engine);
+    _deserializeFromFile(&env, &filePath, engine)
+}
+
+fn _deserializeFromFile(env: &JNIEnv, filePath: &String, engine: &mut Engine) -> bool {
     debug!("Will try to deserialize engine from {:?}", filePath);
     let mut file = match File::open(&filePath) {
         Err(why) => throwAndPanic!(&env, format!("couldn't open {:?}: {:?}", filePath, why)),
