@@ -18,6 +18,7 @@ use std::sync::Once;
 #[cfg(not(target_os = "android"))]
 use {env_logger::Builder, log::LevelFilter};
 use std::panic::{catch_unwind, UnwindSafe};
+use lazy_static::lazy_static;
 
 
 const IS_MATCHED_MASK: i8 = 1;
@@ -29,22 +30,22 @@ const TRUE: jbyte = 1;
 const FALSE: jbyte = 0;
 
 
-static START: Once = Once::new();
-
-#[cfg(target_os = "android")]
-fn check_init() {
-    START.call_once(|| {
-        android_logger::init_once(Config::default().with_min_level(Level::Debug));
-    });
-}
-
-#[cfg(not(target_os = "android"))]
-fn check_init() {
-    START.call_once(|| {
+lazy_static! {
+    static ref _INIT_LOG: Once = {
+        let init = Once::new();
+        #[cfg(target_os = "android")]
+        init.call_once(|| {
+         android_logger::init_once(Config::default().with_min_level(Level::Debug));
+         });
+        #[cfg(not(target_os = "android"))]
+        init.call_once(|| {
         let mut builder = Builder::new();
         builder.filter_level(LevelFilter::Debug);
         builder.init();
-    });
+        });
+
+init
+};
 }
 
 fn unwrapString(env: &JNIEnv, jString: JString) -> String {
@@ -60,7 +61,7 @@ fn unwrapEngine<'a>(enginePointer: jlong) -> &'a mut Engine {
     let engine = if let Some(restored) = unsafe { enginePointer.as_mut() } {
         restored
     } else {
-        panic!("Engine is not allocated anymore!")
+        panic!("Engine pointer is null!")
     };
     engine
 }
@@ -138,7 +139,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineCreate(
     rules: JString,
 ) -> jlong {
     catch_and_forward_exceptions_jlong(&env, || {
-        check_init();
         let loadedRules = unwrapString(&env, rules);
 
         let engine = _engineCreate(&loadedRules);
@@ -161,7 +161,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineCreateDefault(
     _: JObject,
 ) -> jlong {
     catch_and_forward_exceptions_jlong(&env, || {
-        check_init();
         let engine = Engine::default();
         Box::into_raw(Box::new(engine)) as jlong
     })
@@ -180,7 +179,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_simpleMatch(
     resource_type: JString,
 ) -> jbyte {
     catch_and_forward_exceptions_jbyte(&env, || {
-        check_init();
         let url = unwrapString(&env, url);
         let host = unwrapString(&env, host);
         let resource_type = unwrapString(&env, resource_type);
@@ -223,7 +221,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_match(
     previous_result: jbyte,
 ) -> jbyte {
     catch_and_forward_exceptions_jbyte(&env, || {
-        check_init();
         let url = unwrapString(&env, url);
         let host = unwrapString(&env, host);
         let tab_host = unwrapString(&env, tab_host);
@@ -272,7 +269,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineEnableTag(
     tag: JString,
 ) {
     catch_and_forward_exceptions_void(&env, || {
-        check_init();
         let tag = unwrapString(&env, tag);
         let engine = unwrapEngine(engine);
         engine.enable_tags(&[&tag]);
@@ -288,7 +284,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineTagExists(
     tag: JString,
 ) -> jbyte {
     catch_and_forward_exceptions_bool(&env, || {
-        check_init();
         let tag = unwrapString(&env, tag);
         let engine = unwrapEngine(engine);
         let res = engine.tag_exists(&tag);
@@ -306,7 +301,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDisableTag(
     tag: JString,
 ) {
     catch_and_forward_exceptions_void(&env, || {
-        check_init();
         let tag = unwrapString(&env, tag);
         let engine = unwrapEngine(engine);
         engine.disable_tags(&[&tag]);
@@ -324,7 +318,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResources(
     data: JString,
 ) -> jbyte {
     catch_and_forward_exceptions_bool(&env, || {
-        check_init();
         let key = unwrapString(&env, key);
         let contentType = unwrapString(&env, contentType);
         let data = unwrapString(&env, data);
@@ -353,7 +346,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineAddResourceFro
     resourcesJson: JString,
 ) {
     catch_and_forward_exceptions_void(&env, || {
-        check_init();
         let resourcesJson = unwrapString(&env, resourcesJson);
         let engine = unwrapEngine(engine);
 
@@ -379,7 +371,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserialize(
     data: jbyteArray,
 ) -> jbyte {
     catch_and_forward_exceptions_bool(&env, || {
-        check_init();
         let data = env.convert_byte_array(data).unwrap();
         let engine = unwrapEngine(engine);
         _deserialize(&data, engine)
@@ -406,7 +397,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_engineDeserializeFro
     filePath: JString,
 ) -> jbyte {
     catch_and_forward_exceptions_bool(&env, || {
-        check_init();
         let filePath = unwrapString(&env, filePath);
         let engine = unwrapEngine(engine);
         _deserializeFromFile(&filePath, engine)
