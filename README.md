@@ -1,6 +1,11 @@
 # Rust Adblocker JNI bindings for Android
 
-See the original [rust adblocker](https://github.com/brave/adblock-rust) project and the [ffi bindings](https://github.com/brave/adblock-rust-ffi) for further documentation.
+[![](https://img.shields.io/github/v/tag/xaynetwork/adblock-rust-jni.svg?label=version)](https://github.com/xaynetwork/adblock-rust-jni/packages)
+
+### install
+
+
+
 
 ### Preparation 
 
@@ -49,9 +54,7 @@ cd aar
 - create tests for tags and resources
 - create benchmark
 - add android example project with webview 
-- publish aar as version 0.1.0 in jitpack
 - add verification on CI
-- fix android logger on emulator / device
 - fix not throwing exceptions
 - add proguard rules to keep jni names
 

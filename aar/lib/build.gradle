@@ -36,7 +36,7 @@ android {
     kotlinOptions {
         jvmTarget = '1.8'
     }
-    ndkVersion "21.3.6528147"
+    ndkVersion "21.1.6352462"
 
     sourceSets {
         main {
@@ -100,14 +100,14 @@ afterEvaluate {
             }
         }
         publications {
-            gpr(MavenPublication) {
+            release(MavenPublication) {
                 // Applies the component for the release build variant.
                 from components.release
 
                 // You can then customize attributes of the publication as shown below.
                 groupId = 'com.xayn.adblockeraar'
                 artifactId = 'adblocker'
-                version = gitVersion()
+                version = versionDetails().lastTag
             }
         }
     }
