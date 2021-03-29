@@ -116,6 +116,7 @@ class LoadingJniTest {
         assertEquals(true, matchPosiitive.isMatched)
         assertEquals(false, matchNegative.isMatched)
     }
+
     @Test(expected = Exception::class)
     fun `Deserialize engine from file that does not exist should throw`() {
         val engine = Adblock.INSTANCE.createEngine()

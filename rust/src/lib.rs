@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 
-use log::{error, debug};
 #[cfg(target_os = "android")]
 use android_logger;
+use log::{debug, error};
 
 use adblock::engine::Engine;
 #[cfg(target_os = "android")]
@@ -12,14 +12,13 @@ use adblock::resources::{MimeType, Resource, ResourceType};
 use jni::objects::{JObject, JString};
 use jni::sys::{jbyte, jbyteArray, jlong};
 use jni::JNIEnv;
+use lazy_static::lazy_static;
 use std::fs::File;
 use std::io::prelude::*;
+use std::panic::{catch_unwind, UnwindSafe};
 use std::sync::Once;
 #[cfg(not(target_os = "android"))]
 use {env_logger::Builder, log::LevelFilter};
-use std::panic::{catch_unwind, UnwindSafe};
-use lazy_static::lazy_static;
-
 
 const IS_MATCHED_MASK: i8 = 1;
 const IS_IMPORTANT_MASK: i8 = 2;
@@ -29,23 +28,22 @@ const NULL_POINTER: jlong = 0;
 const TRUE: jbyte = 1;
 const FALSE: jbyte = 0;
 
-
 lazy_static! {
     static ref _INIT_LOG: Once = {
         let init = Once::new();
         #[cfg(target_os = "android")]
         init.call_once(|| {
-         android_logger::init_once(Config::default().with_min_level(Level::Debug));
-         });
+            android_logger::init_once(Config::default().with_min_level(Level::Debug));
+        });
         #[cfg(not(target_os = "android"))]
         init.call_once(|| {
-        let mut builder = Builder::new();
-        builder.filter_level(LevelFilter::Debug);
-        builder.init();
+            let mut builder = Builder::new();
+            builder.filter_level(LevelFilter::Debug);
+            builder.init();
         });
 
-init
-};
+        init
+    };
 }
 
 fn unwrapString(env: &JNIEnv, jString: JString) -> String {
@@ -66,31 +64,57 @@ fn unwrapEngine<'a>(enginePointer: jlong) -> &'a mut Engine {
     engine
 }
 
-fn catch_and_forward_exceptions_bool<F: FnOnce() -> bool + UnwindSafe>(env: &JNIEnv, f: F) -> jbyte {
-    _catch_and_forward_exceptions(env, f, |v| { if v { TRUE } else { FALSE } }, ERROR)
+fn catch_and_forward_exceptions_bool<F: FnOnce() -> bool + UnwindSafe>(
+    env: &JNIEnv,
+    f: F,
+) -> jbyte {
+    _catch_and_forward_exceptions(
+        env,
+        f,
+        |v| {
+            if v {
+                TRUE
+            } else {
+                FALSE
+            }
+        },
+        ERROR,
+    )
 }
 
-fn catch_and_forward_exceptions_jlong<F: FnOnce() -> jlong + UnwindSafe>(env: &JNIEnv, f: F) -> jlong {
-    _catch_and_forward_exceptions(env, f, |v| { v }, NULL_POINTER)
+fn catch_and_forward_exceptions_jlong<F: FnOnce() -> jlong + UnwindSafe>(
+    env: &JNIEnv,
+    f: F,
+) -> jlong {
+    _catch_and_forward_exceptions(env, f, |v| v, NULL_POINTER)
 }
 
-fn catch_and_forward_exceptions_jbyte<F: FnOnce() -> jbyte + UnwindSafe>(env: &JNIEnv, f: F) -> jbyte {
-    _catch_and_forward_exceptions(env, f, |v| { v }, ERROR)
+fn catch_and_forward_exceptions_jbyte<F: FnOnce() -> jbyte + UnwindSafe>(
+    env: &JNIEnv,
+    f: F,
+) -> jbyte {
+    _catch_and_forward_exceptions(env, f, |v| v, ERROR)
 }
 
 fn catch_and_forward_exceptions_void<F: FnOnce() -> R + UnwindSafe, R>(env: &JNIEnv, f: F) -> () {
-    _catch_and_forward_exceptions(env, f, |_| { () }, ())
+    _catch_and_forward_exceptions(env, f, |_| (), ())
 }
 
-fn _catch_and_forward_exceptions<F: FnOnce() -> R + UnwindSafe, C: FnOnce(R) -> RES, R, RES>(env: &JNIEnv, f: F, convert: C, error_value: RES) -> RES {
+fn _catch_and_forward_exceptions<F: FnOnce() -> R + UnwindSafe, C: FnOnce(R) -> RES, R, RES>(
+    env: &JNIEnv,
+    f: F,
+    convert: C,
+    error_value: RES,
+) -> RES {
     match catch_unwind(f) {
-        Ok(v) => {
-            convert(v)
-        }
+        Ok(v) => convert(v),
         Err(err) => {
             error!("Will throw panic: {:?}", err);
             env.throw(format!("{:?}", err)).unwrap_or_else(|err2| {
-                error!("Could not throw error that initially was {:?} : {:?}", err, err2)
+                error!(
+                    "Could not throw error that initially was {:?} : {:?}",
+                    err, err2
+                )
             });
             error_value
         }
@@ -188,7 +212,6 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_simpleMatch(
     })
 }
 
-
 fn _simpleMatch(url: &String, host: &String, resource_type: &String, engine: &mut Engine) -> i8 {
     let blocker_result = engine.check_network_urls(&url, &host, &resource_type);
     debug!("New result for {:?} with {:?}", url, blocker_result);
@@ -227,11 +250,27 @@ pub unsafe extern "C" fn Java_com_xayn_adblockeraar_Adblock_match(
         let resource_type = unwrapString(&env, resource_type);
         let engine = unwrapEngine(engine);
 
-        _match(third_party, previous_result, &url, &host, &tab_host, &resource_type, engine)
+        _match(
+            third_party,
+            previous_result,
+            &url,
+            &host,
+            &tab_host,
+            &resource_type,
+            engine,
+        )
     })
 }
 
-fn _match(third_party: bool, previous_result: i8, url: &String, host: &String, tab_host: &String, resource_type: &String, engine: &mut Engine) -> i8 {
+fn _match(
+    third_party: bool,
+    previous_result: i8,
+    url: &String,
+    host: &String,
+    tab_host: &String,
+    resource_type: &String,
+    engine: &mut Engine,
+) -> i8 {
     let was_matched = previous_result & IS_MATCHED_MASK != 0;
     let was_exception = previous_result & IS_EXCEPTION_MASK != 0;
 
@@ -386,7 +425,6 @@ fn _deserialize(data: &Vec<u8>, engine: &mut Engine) -> bool {
         }
     }
 }
-
 
 /// Deserializes a previously serialized data file list from a local file path
 #[no_mangle]
