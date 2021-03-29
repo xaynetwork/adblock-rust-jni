@@ -53,5 +53,6 @@ cd aar
 - add verification on CI
 - fix android logger on emulator / device
 - fix not throwing exceptions
+- add proguard rules to keep jni names
 
  
