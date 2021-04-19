@@ -47,6 +47,13 @@ cd aar
 ./gradlew test
 ```
 
+### Publish
+
+```bash
+cd aar
+./gradlew 
+```
+
 ## TODO
 
 - Add licence
