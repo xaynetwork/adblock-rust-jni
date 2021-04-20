@@ -99,7 +99,7 @@ class LoadingJniTest {
     }
 
     @Test
-    fun `Deserialize engine from file`() {
+    fun `Deserialize global engine from file`() {
         val engine = Adblock.INSTANCE.createEngine()
         val file = File("src/test/rs-ABPFilterParserData.dat")
 
@@ -114,6 +114,21 @@ class LoadingJniTest {
         )
 
         assertEquals(true, matchPosiitive.isMatched)
+        assertEquals(false, matchNegative.isMatched)
+    }
+
+    @Test
+    fun `Deserialize regional engine from file`() {
+        val engine = Adblock.INSTANCE.createEngine()
+        val file = File("src/test/rs-adblock_de.dat")
+
+        val deserialize = engine.deserialize(file.absolutePath)
+
+        val matchNegative = engine. match(
+                "https://www.google.com" ,"https://www.google.com", "script"
+        )
+
+        assertEquals("Engine is not initialized successful!",true, deserialize, );
         assertEquals(false, matchNegative.isMatched)
     }
 

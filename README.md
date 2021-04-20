@@ -64,5 +64,6 @@ cd aar
 - add verification on CI
 - fix not throwing exceptions
 - add proguard rules to keep jni names
+- publish sources with maven
 
  
